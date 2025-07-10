@@ -351,6 +351,30 @@
         let portonData = [];
         let combinedResults = [];
 
+        // Dictionary for converting last two digits of sample barcodes
+        const lastTwoDigitsMap = {
+            '60': '0', '61': '1', '62': '2', '63': '3', '64': '4', '65': '5', '66': '6', '67': '7', '68': '8', '69': '9',
+            '70': 'A', '71': 'B', '72': 'C', '73': 'D', '74': 'E', '75': 'F', '76': 'G', '77': 'H', '78': 'I', '79': 'J',
+            '80': 'K', '81': 'L', '82': 'M', '83': 'N', '84': 'O', '85': 'P', '86': 'Q', '87': 'R', '88': 'S', '89': 'T',
+            '90': 'U', '91': 'V', '92': 'W', '93': 'X', '94': 'Y', '95': 'Z', '96': '*'
+        };
+
+        // Function to transform sample barcode
+        function transformSampleBarcode(barcode) {
+            // Check if it's a G-code with the expected length (15 characters)
+            if (barcode && barcode.length === 15 && barcode.startsWith('G')) {
+                const lastTwoDigits = barcode.slice(-2);
+                const replacement = lastTwoDigitsMap[lastTwoDigits];
+                
+                if (replacement !== undefined) {
+                    // Replace last two digits with the corresponding character
+                    return barcode.slice(0, -2) + replacement;
+                }
+            }
+            // Return original barcode if no transformation applies
+            return barcode;
+        }
+
         function handleMatrixFiles(input) {
             const files = input.files;
             const fileInfo = document.getElementById('matrixFileInfo');
@@ -520,14 +544,7 @@
                     };
                 });
 
-                // Create a mapping from PORTON plate to Matrix rack
-                // Sort rack codes to ensure consistent assignment
-                const uniqueRacks = [...new Set(matrixData.map(row => row.RackCode))].sort();
-                const plateToRackMap = {
-                    'Plate1': uniqueRacks[0] || 'UNKNOWN_RACK',
-                    'Plate2': uniqueRacks[1] || 'UNKNOWN_RACK', 
-                    'Plate3': uniqueRacks[2] || 'UNKNOWN_RACK'
-                };
+                // No need for plate mapping - TRackBC contains actual Matrix rack barcodes
 
                 // Process PORTON data and combine with Matrix data
                 combinedResults = [];
@@ -539,7 +556,7 @@
                     const tPositionId = row.TPositionId;
                     const sPositionBC = row.SPositionBC;
                     const sLabwareID = row.SLabwareID;
-                    const tRackBC = row.TRackBC; // Get the plate name (Plate1, Plate2, Plate3)
+                    const tRackBC = row.TRackBC; // This contains the actual Matrix rack barcode (FK00813176, etc.)
                     const tSumStateDescription = row.TSumStateDescription || ''; // Get error message
                     
                     // Skip rows that don't have valid sample data
@@ -547,12 +564,9 @@
                         return;
                     }
                     
-                    // Map PORTON plate to Matrix rack
-                    const assignedRack = plateToRackMap[tRackBC];
-                    
-                    // Try to find matching matrix data
-                    // Match plate+position combination
-                    const matrixKey = `${assignedRack}_${tPositionId}`;
+                    // Try to find matching matrix data using TRackBC directly
+                    // Match rack+position combination
+                    const matrixKey = `${tRackBC}_${tPositionId}`;
                     const matrixMatch = matrixMap[matrixKey];
                     
                     // Clean up the barcode (remove leading '=' if present)
@@ -578,12 +592,11 @@
                     // Initialize position entry if it doesn't exist
                     if (!positionMap[positionKey]) {
                         positionMap[positionKey] = {
-                            PlateId: tRackBC,
+                            RackBarcode: tRackBC,
                             TPositionId: tPositionId,
                             SampleBarcode: '',
                             MOLISBarcode: '',
                             MatrixTubeBarcode: matrixMatch ? matrixMatch.TubeCode : 'NOT_FOUND',
-                            RackBarcode: assignedRack,
                             Date: matrixMatch ? matrixMatch.Date : 'NOT_FOUND',
                             ErrorMessage: '',
                             MatchStatus: matrixMatch ? 'MATCHED' : 'UNMATCHED'
@@ -592,7 +605,8 @@
                     
                     // Add barcode to appropriate field
                     if (isSampleBarcode) {
-                        positionMap[positionKey].SampleBarcode = cleanBarcode;
+                        // Apply transformation to sample barcode
+                        positionMap[positionKey].SampleBarcode = transformSampleBarcode(cleanBarcode);
                     } else if (isMolisBarcode) {
                         positionMap[positionKey].MOLISBarcode = cleanBarcode;
                     }
