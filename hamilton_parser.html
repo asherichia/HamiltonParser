@@ -375,6 +375,41 @@
             return barcode;
         }
 
+        // Function to validate MOLIS ID format
+        function validateMolisId(molisId) {
+            // Standard MOLIS pattern: X99X99999901 (letter, 2 digits, letter, 5+ digits, 01)
+            const molisPattern = /^[A-Z]\d{2}[A-Z]\d+01$/;
+            return molisPattern.test(molisId);
+        }
+
+        // Function to remove last 2 digits from MOLIS ID for output
+        function formatMolisForOutput(molisId) {
+            if (molisId && molisId.length >= 2) {
+                return molisId.slice(0, -2);
+            }
+            return molisId;
+        }
+
+        // Function to detect duplicates in arrays
+        function findDuplicates(arr, fieldName) {
+            const counts = {};
+            const duplicates = [];
+            
+            arr.forEach(item => {
+                if (item && item.trim() !== '') {
+                    counts[item] = (counts[item] || 0) + 1;
+                }
+            });
+            
+            Object.keys(counts).forEach(key => {
+                if (counts[key] > 1) {
+                    duplicates.push(`${fieldName}: ${key} (appears ${counts[key]} times)`);
+                }
+            });
+            
+            return duplicates;
+        }
+
         function handleMatrixFiles(input) {
             const files = input.files;
             const fileInfo = document.getElementById('matrixFileInfo');
@@ -578,9 +613,28 @@
                     
                     if (cleanBarcode.endsWith('01')) {
                         // Check if it matches MOLIS pattern
-                        const molisPattern = /^[A-Z]\d{2}[A-Z]\d+01$/;
-                        if (molisPattern.test(cleanBarcode)) {
+                        if (validateMolisId(cleanBarcode)) {
                             isMolisBarcode = true;
+                        } else {
+                            // Invalid MOLIS format - add error message
+                            const positionKey = `${tRackBC}_${tPositionId}`;
+                            if (!positionMap[positionKey]) {
+                                positionMap[positionKey] = {
+                                    RackBarcode: tRackBC,
+                                    TPositionId: tPositionId,
+                                    SampleBarcode: '',
+                                    MOLISBarcode: '',
+                                    MatrixTubeBarcode: 'NOT_FOUND',
+                                    Date: 'NOT_FOUND',
+                                    ErrorMessage: '',
+                                    MatchStatus: 'UNMATCHED'
+                                };
+                            }
+                            if (positionMap[positionKey].ErrorMessage) {
+                                positionMap[positionKey].ErrorMessage += '; Invalid MOLIS ID format: ' + cleanBarcode;
+                            } else {
+                                positionMap[positionKey].ErrorMessage = 'Invalid MOLIS ID format: ' + cleanBarcode;
+                            }
                         }
                     } else if (cleanBarcode.length > 10 && (cleanBarcode.startsWith('G') || cleanBarcode.startsWith('g'))) {
                         isSampleBarcode = true;
@@ -608,7 +662,8 @@
                         // Apply transformation to sample barcode
                         positionMap[positionKey].SampleBarcode = transformSampleBarcode(cleanBarcode);
                     } else if (isMolisBarcode) {
-                        positionMap[positionKey].MOLISBarcode = cleanBarcode;
+                        // Format MOLIS ID for output (remove last 2 digits)
+                        positionMap[positionKey].MOLISBarcode = formatMolisForOutput(cleanBarcode);
                     }
                     
                     // Add error message if it exists (combine multiple error messages if needed)
@@ -631,7 +686,30 @@
                     }
                 });
 
+                // Detect duplicates across all data
+                const allSampleBarcodes = combinedResults.map(r => r.SampleBarcode).filter(b => b && b.trim() !== '');
+                const allMolisBarcodes = combinedResults.map(r => r.MOLISBarcode).filter(b => b && b.trim() !== '');
+                const allTubeBarcodes = combinedResults.map(r => r.MatrixTubeBarcode).filter(b => b && b.trim() !== '' && b !== 'NOT_FOUND');
+                const allRackBarcodes = matrixData.map(r => r.RackCode).filter(b => b && b.trim() !== '');
+
+                const sampleDuplicates = findDuplicates(allSampleBarcodes, 'Sample Barcode');
+                const molisDuplicates = findDuplicates(allMolisBarcodes, 'MOLIS Barcode');
+                const tubeDuplicates = findDuplicates(allTubeBarcodes, 'Tube Barcode');
+                const rackDuplicates = findDuplicates(allRackBarcodes, 'Rack Barcode');
+
+                const allDuplicates = [...sampleDuplicates, ...molisDuplicates, ...tubeDuplicates, ...rackDuplicates];
+
                 // Display results
+                let duplicateWarning = '';
+                if (allDuplicates.length > 0) {
+                    duplicateWarning = `
+                        <div class="error">
+                            ⚠️ Duplicate IDs Detected:<br>
+                            ${allDuplicates.join('<br>')}
+                        </div>
+                    `;
+                }
+
                 resultsContent.innerHTML = `
                     <div class="success">
                         Processing completed successfully!<br>
@@ -639,6 +717,7 @@
                         Matched with Matrix data: ${matched}<br>
                         Unmatched: ${unmatched}
                     </div>
+                    ${duplicateWarning}
                     <div class="preview">
                         ${generateResultsTable()}
                     </div>
